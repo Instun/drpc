@@ -11,7 +11,7 @@ const svr = new http.Server(8811, ws.upgrade(
     rpc.handler(
         {
             test: async function (v1, v2) {
-                await sleep(1000);
+                await sleep(200);
                 return v1 + v2;
             }
         }

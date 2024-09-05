@@ -13,7 +13,7 @@ drtc.listen({
 }, rpc.handler(
     {
         test: async function (v1, v2) {
-            await sleep(1000);
+            await sleep(200);
             return v1 + v2;
         }
     }
