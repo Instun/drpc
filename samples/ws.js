@@ -3,10 +3,15 @@ const http = require('http')
 
 const rpc = require('..')
 
+async function sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
+
 const svr = new http.Server(8811, ws.upgrade(
     rpc.handler(
         {
-            test: function (v1, v2) {
+            test: async function (v1, v2) {
+                await sleep(1000);
                 return v1 + v2;
             }
         }

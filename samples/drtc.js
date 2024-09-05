@@ -3,13 +3,17 @@ const cert = require('./cert.json');
 
 const rpc = require('..')
 
+async function sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
 
 drtc.listen({
     port: 60916,
     key: cert.key, cert: cert.cert
 }, rpc.handler(
     {
-        test: function (v1, v2) {
+        test: async function (v1, v2) {
+            await sleep(1000);
             return v1 + v2;
         }
     }
