@@ -1,6 +1,6 @@
 {
   "name": "@instun/drpc",
-  "version": "1.1.1",
+  "version": "2.0.0",
   "description": "",
   "main": "lib/index.js",
   "repository": "https://github.com/Instun/drpc",
