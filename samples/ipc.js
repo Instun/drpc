@@ -3,9 +3,8 @@ const path = require("path");
 
 const common = require('./common.js')
 
-const conn = child_process.fork(path.join(__dirname, "child.js"));
 async function main() {
-    await common.test(conn);
+    await common.test(child_process.fork(path.join(__dirname, "handler-ipc.js")));
     process.exit(0);
 }
 
