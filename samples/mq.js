@@ -14,7 +14,9 @@ function mq_connect(handler) {
 const common = require('./common.js')
 
 async function main() {
-    await common.test(mq_connect(common.handler));
+    await common.test(mq_connect(common.handler), {
+        opened: true
+    });
     process.exit(0);
 }
 

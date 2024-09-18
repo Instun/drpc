@@ -43,8 +43,9 @@ exports.handler = rpc.handler({
     }
 });
 
-exports.test = async function (conn) {
+exports.test = async function (conn, opts) {
     const remoting = rpc.open(conn, {
+        ...opts,
         timeout: 3000
     });
 
