@@ -1,7 +1,7 @@
-const common = require('./common.js')
+const common = require('./res/common.js')
 
 const drtc = require('@instun/drtc');
-const cert = require('./cert.json');
+const cert = require('./res/cert.json');
 
 drtc.listen({
     port: 60916,

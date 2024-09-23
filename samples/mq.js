@@ -1,3 +1,5 @@
+const common = require('./res/common.js')
+
 const events = require('events');
 
 function mq_connect(handler) {
@@ -10,8 +12,6 @@ function mq_connect(handler) {
     handler(peer1);
     return peer2;
 }
-
-const common = require('./common.js')
 
 async function main() {
     await common.test(mq_connect(common.handler), {

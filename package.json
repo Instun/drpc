@@ -7,6 +7,9 @@
   "keywords": "",
   "author": "",
   "license": "MIT",
+  "scripts": {
+    "build": "esbuild samples/res/client.js --bundle --outfile=samples/res/web_index.js"
+  },
   "publishConfig": {
     "access": "public"
   },

@@ -1,4 +1,4 @@
-const rpc = require('..')
+const rpc = require('../../lib')
 
 async function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
@@ -64,5 +64,6 @@ exports.test = async function (conn, opts) {
     // console.log(`remoting.test2.test3(3, 4) === ${await remoting.test2.test3(4, 5)}`)
     // console.log(`remoting.test_func.test6(3, 4) === ${await remoting.test_func.test6(4, 5)}`)
 
-    console.assert(await remoting.test(1, 2) === 3, 'test method is invalid.')
+    if (await remoting.test(1, 2) !== 3)
+        console.log('test method is invalid.');
 }

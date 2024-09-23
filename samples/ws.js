@@ -1,4 +1,4 @@
-const common = require('./common.js')
+const common = require('./res/common.js')
 
 const ws = require('ws')
 const http = require('http')
