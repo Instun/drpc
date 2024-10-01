@@ -7,7 +7,9 @@ const svr = new http.Server(8811, ws.upgrade(common.handler));
 svr.start();
 
 async function main() {
-    await common.test(new ws.Socket("ws://127.0.0.1:8811"));
+    await common.test(function () {
+        return new ws.Socket("ws://127.0.0.1:8811")
+    });
     process.exit(0);
 }
 
