@@ -11,7 +11,9 @@ async function main() {
         opened: true
     });
 
-    window.close();
+    setTimeout(() => {
+        window.close();
+    }, 2000);
 }
 
 main();

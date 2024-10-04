@@ -45,7 +45,10 @@ exports.handler = rpc.handler({
     },
     close: async function () {
         if (is_callback)
-            this.close();
+            this[Symbol.for("conn")].close();
+    },
+    client_test: async function (v1, v2) {
+        return await this.client_callback(v1, v2) + ", " + await this.test.test1(v1, v2);
     }
 });
 
@@ -54,7 +57,19 @@ exports.test = async function (conn, opts) {
 
     const remoting = rpc.open(conn, {
         ...opts,
-        timeout: 3000
+        timeout: 3000,
+        routing: {
+            client_callback: async function (v1, v2) {
+                await sleep(200);
+                return "client_callback result: " + (v1 + v2);
+            },
+            test: {
+                test1: async function (v1, v2) {
+                    await sleep(200);
+                    return "test.test1 result: " + (v1 + v2 + 20);
+                }
+            }
+        }
     });
 
     console.log(`remoting.test(1, 2) === ${await remoting.test(1, 2)}`)
@@ -62,6 +77,7 @@ exports.test = async function (conn, opts) {
     console.log(`remoting.test.test1.test2(3, 4) === ${await remoting.test.test1.test2(3, 4)}`)
     console.log(`remoting.test1.test2(4, 5) === ${await remoting.test1.test2(4, 5)}`)
     console.log(`remoting.test1.test3.test4(5, 6) === ${await remoting.test1.test3.test4(5, 6)}`)
+    console.log(`remoting.client_test(5, 6) === ${await remoting.client_test(5, 6)}`)
 
     try {
         await remoting.close();
