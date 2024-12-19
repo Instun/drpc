@@ -2,31 +2,37 @@
 
 ## Overview
 
-@instun/drpc is a lightweight, flexible, and efficient library for handling JSON-RPC communication. It is designed to work seamlessly in various JavaScript environments, including web browsers, Node.js, Fibjs, and React Native. This versatility makes it an ideal choice for projects that require a unified interface for remote procedure calls across different platforms. Additionally, drpc is compatible with a wide range of connection objects, such as WebSocket, WebRTC, IPC, Worker, and custom message queues. This broad compatibility ensures that @instun/drpc can be used in a variety of scenarios, from real-time web applications to complex server-side systems and mobile applications.
-
-The library is designed to be lightweight, ensuring minimal overhead and high performance. This efficiency is crucial for applications that require low latency and high throughput. @instun/drpc is also easy to integrate with existing projects, minimizing setup time and allowing developers to quickly add JSON-RPC capabilities to their applications. The library fully adheres to the JSON-RPC 2.0 specification, ensuring compatibility with other JSON-RPC implementations and providing a reliable and standardized communication protocol.
+@instun/drpc is a lightweight, flexible, and efficient library for handling JSON-RPC communication across various JavaScript environments. Built with a focus on performance and reliability, it provides a unified interface for remote procedure calls in web browsers, Node.js, Fibjs, and React Native applications. The library supports a wide range of connection objects, including WebSocket, WebRTC, IPC, Worker, and custom message queues, making it versatile enough for everything from real-time web applications to complex server-side systems.
 
 ## Features
 
-- **JSON-RPC 2.0 Compliant**: @instun/drpc fully adheres to the JSON-RPC 2.0 specification, ensuring compatibility with other JSON-RPC implementations and providing a reliable and standardized communication protocol. This compliance guarantees that the library can be used in a wide range of applications and environments without compatibility issues.
+- **Cross-Platform Support**
+  - Web browsers (modern and legacy)
+  - Node.js and Fibjs environments
+  - React Native compatibility
+  - Electron and NW.js support
+  - Universal module support (UMD)
 
-- **Cross-Platform Support**: The library is designed to work seamlessly in various JavaScript environments, including web browsers, Node.js, Fibjs, and React Native. This versatility makes it an ideal choice for projects that require a unified interface for remote procedure calls across different platforms. Whether you are developing a web application, a server-side application, or a mobile application, @instun/drpc provides the tools you need to implement robust and efficient JSON-RPC communication.
+- **Transport Layer Support**
+  - WebSocket integration
+  - WebRTC data channels
+  - Inter-process communication (IPC)
+  - Web Workers messaging
+  - Custom transport protocols
 
-- **Client and Server Implementations**: @instun/drpc provides robust support for both client and server-side JSON-RPC. This dual support allows developers to implement JSON-RPC communication in both client and server applications, enabling seamless communication between different parts of an application or between different applications.
+- **Development Experience**
+  - Simple and intuitive API
+  - Comprehensive documentation
+  - Built-in testing utilities
+  - TypeScript support
+  - Debugging tools
 
-- **Bidirectional RPC**: The library supports bidirectional RPC, allowing the server to initiate RPC calls to the client based on the APIs exposed by the client. This feature is useful in scenarios where the server needs to request information or trigger actions on the client, enabling more interactive and dynamic communication between the client and server.
-
-- **Easy Integration**: @instun/drpc is designed to be easy to integrate with existing projects, minimizing setup time and allowing developers to quickly add JSON-RPC capabilities to their applications. The library provides a simple and intuitive API, making it easy to implement JSON-RPC communication without extensive configuration or setup.
-
-- **Lightweight and Efficient**: The library is lightweight, ensuring minimal overhead and high performance. This efficiency makes it suitable for use in performance-critical applications where low latency and high throughput are essential.
-
-- **Automatic Reconnection**: @instun/drpc includes built-in support for automatic reconnection in case of connection loss. This feature ensures that the communication between the client and server remains reliable and resilient, even in the face of network interruptions or other connectivity issues.
-
-- **Error Handling**: The library provides comprehensive error handling and reporting mechanisms, allowing developers to easily detect and handle errors in JSON-RPC communication. This robust error handling ensures that applications can gracefully recover from errors and continue to function correctly.
-
-- **Asynchronous Communication**: @instun/drpc supports asynchronous communication, making it suitable for modern web applications that require non-blocking communication between the client and server. This feature allows developers to implement efficient and responsive applications that can handle multiple concurrent requests and responses.
-
-- **Rich Connection Object Compatibility**: @instun/drpc is compatible with various connection objects, including WebSocket, WebRTC, IPC, Worker, and custom message queues. This broad compatibility ensures that the library can be used in a variety of scenarios, from real-time web applications to complex server-side systems and mobile applications. This flexibility allows developers to choose the most appropriate connection method for their specific use case, ensuring optimal performance and reliability.
+- **Security**
+  - Input validation
+  - Request sanitization
+  - Rate limiting support
+  - Timeout handling
+  - Session management
 
 ## Installation
 
@@ -36,93 +42,288 @@ You can install @instun/drpc via npm:
 npm install @instun/drpc
 ```
 
-## Usage
+## Usage Guide
 
-### Server
+### Basic Setup
 
-To create a JSON-RPC server, you can use the `handler` function from the library:
+The library provides a clean and intuitive API for both client and server implementations. You can quickly set up RPC communication with just a few lines of code:
 
 ```js
 const rpc = require('@instun/drpc');
-const ws = reuire('ws');
-const http = reuire('http');
+const ws = require('ws');
+const http = require('http');
 
-async function sleep(ms) {
-    return new Promise(resolve => setTimeout(resolve, ms));
-}
-
-const svr = new http.Server(8811, ws.upgrade(rpc.handler({
-    test: async function (v1, v2) {
-        await sleep(200);
-        return v1 + v2;
+// Server setup
+const server = new http.Server(8811, ws.upgrade(rpc.handler({
+    add: async (a, b) => a + b,
+    user: {
+        profile: {
+            get: async (userId) => ({ id: userId, name: 'John' })
+        }
     }
-}));
-svr.start();
-```
+})));
 
-### Client
-
-To create a JSON-RPC client, you can use the `open` function from the library:
-
-```js
-const rpc = require('@instun/drpc');
-const ws = reuire('ws');
-
-const remoting = rpc.open(function () {
-    return new ws.Socket("ws://127.0.0.1:8811")
+// Client setup
+const client = rpc.open(() => new ws.Socket('ws://127.0.0.1:8811'), {
+    timeout: 5000,
+    maxRetries: 3
 });
 
-await remoting.test(1, 2);
+// Make RPC calls
+const sum = await client.add(1, 2);
+const profile = await client.user.profile.get(123);
 ```
 
-### Bidirectional RPC
+### Method Routing and Middleware
 
-@instun/drpc supports bidirectional RPC, allowing the server to initiate RPC calls to the client. This is useful in scenarios where the server needs to request information or trigger actions on the client.
+Method routing in @instun/drpc provides a powerful and flexible way to organize your RPC endpoints. The routing system supports:
+- Nested namespaces for logical grouping
+- Method chaining
+- Parameter validation and transformation
+- Various parameter types and return values
+- Primitive values as handlers
 
-Example:
+Example implementation:
 
 ```js
-// Client-side
-const rpc = require('@instun/drpc');
-const ws = reuire('ws');
+const server = rpc.handler({
+    // Basic methods
+    add: async (a, b) => a + b,
+    multiply: async (a, b) => a * b,
 
-const remoting = rpc.open(function () {
-    return new ws.Socket("ws://127.0.0.1:8811")
-}, {
+    // Nested namespaces
+    user: {
+        profile: {
+            get: async (userId) => ({ id: userId, name: 'John' }),
+            update: async (userId, data) => ({ success: true })
+        }
+    },
+
+    // Method chaining
+    math: {
+        add: async (a, b) => a + b,
+        multiply: async (a, b) => a * b
+    },
+    string: {
+        concat: async (a, b) => a + b,
+        reverse: async (str) => str.split('').reverse().join('')
+    },
+
+    // Different parameter types
+    echo: {
+        string: str => str,
+        number: num => num,
+        boolean: bool => bool,
+        object: obj => obj,
+        array: arr => arr,
+        null: val => val
+    },
+
+    // Primitive values as handlers
+    version: '1.0.0',            // 返回字符串
+    maxConnections: 100,         // 返回数字
+    isEnabled: true,             // 返回布尔值
+    defaultConfig: {             // 嵌套的原始值
+        name: 'default',
+        timeout: 3000,
+        debug: false
+    }
+});
+
+// Client usage
+const result1 = await client.add(1, 2);                    // 3
+const result2 = await client.math.multiply(2, 3);          // 6
+const result3 = await client.string.reverse('hello');      // 'olleh'
+const result4 = await client.echo.object({ foo: 'bar' });  // { foo: 'bar' }
+const version = await client.version();                    // '1.0.0'
+const timeout = await client.defaultConfig.timeout();      // 3000
+```
+
+### Bidirectional Communication
+
+The library supports full-duplex RPC communication, allowing both server and client to initiate calls. This enables:
+- Server push notifications
+- Real-time updates
+- Client-side API exposure
+- Callback-based workflows
+- Event-driven architectures
+
+Example implementation:
+
+```js
+// Server-side
+const server = rpc.handler({
+    notify: async function(message) {
+        // Call client's method
+        const response = await this.invoke.receive(message);
+        return `Sent: ${message}, Response: ${response}`;
+    }
+});
+
+// Client-side
+const client = rpc.open(connection, {
     routing: {
-        client_callback: async function (v1, v2) {
-            return "client_callback result: " + (v1 + v2);
+        receive: async (message) => {
+            console.log('Received:', message);
+            return 'Message acknowledged';
+        }
+    }
+});
+```
+
+### State Management
+
+The connection state management system provides:
+- Automatic connection recovery
+- Event-based state notifications
+- Configurable retry strategies
+- Connection pooling
+- Session persistence
+
+Example implementation:
+
+```js
+const client = rpc.open(connection, {
+    // Connection configuration
+    timeout: 5000,
+    maxRetries: 3,
+    retryDelay: 1000,
+
+    // State management
+    onStateChange: (oldState, newState) => {
+        console.log(`State: ${oldState} -> ${newState}`);
+        switch (newState) {
+            case 'CONNECTED':
+                console.log('Connection established');
+                break;
+            case 'RECONNECTING':
+                console.log('Attempting to reconnect...');
+                break;
+            case 'CLOSED':
+                console.log('Connection closed');
+                break;
+        }
+    }
+});
+```
+
+### Error Handling
+
+The error handling system provides comprehensive error management with:
+- Standard JSON-RPC error codes
+- Custom error types and codes
+- Enhanced error information
+- Error stack preservation
+- Type-specific error handling
+
+Example implementation:
+
+```js
+const server = rpc.handler({
+    // Basic error throwing
+    throwError: () => {
+        throw new Error('Operation failed');
+    },
+
+    // Custom error with additional information
+    validateUser: (user) => {
+        const error = new Error('Invalid user data');
+        error.code = -32098;  // Custom error code
+        error.data = { field: 'email', reason: 'invalid format' };
+        throw error;
+    },
+
+    // Custom error types
+    handleRequest: (type) => {
+        class ValidationError extends Error {
+            constructor(message) {
+                super(message);
+                this.name = 'ValidationError';
+                this.code = -32099;
+                this.data = { type: 'validation' };
+            }
+        }
+
+        switch (type) {
+            case 'validation':
+                throw new ValidationError('Invalid input');
+            case 'type':
+                throw new TypeError('Invalid type');
+            default:
+                throw new Error('Unknown error');
         }
     }
 });
 
-await remoting.test(1, 2);
-
-// Server-side
-const rpc = require('@instun/drpc');
-const ws = reuire('ws');
-const http = reuire('http');
-
-async function sleep(ms) {
-    return new Promise(resolve => setTimeout(resolve, ms));
-}
-
-const svr = new http.Server(8811, ws.upgrade(rpc.handler({
-    test: async function (v1, v2) {
-        await sleep(200);
-        return await this.client_callback(v1, v2);
+// Client-side error handling
+try {
+    await client.validateUser({ email: 'invalid' });
+} catch (error) {
+    // Standard JSON-RPC error codes
+    switch (error.code) {
+        case -32700: console.log('Parse error');
+        case -32600: console.log('Invalid request');
+        case -32601: console.log('Method not found');
+        case -32602: console.log('Invalid params');
+        case -32603: console.log('Internal error');
+        default:     console.log('Custom error:', error.code);
     }
-}));
-svr.start();
+
+    // Access error details
+    console.log(error.message);  // Error message
+    console.log(error.code);     // Error code
+    console.log(error.data);     // Additional error data
+    console.log(error.stack);    // Error stack trace
+}
+```
+
+### Data Type Handling
+
+The library provides comprehensive support for JavaScript data types:
+- Date objects and timestamps
+- Special values (Infinity, NaN, undefined)
+- Complex nested objects
+- Sparse arrays
+- Custom serialization
+
+Example implementation:
+
+```js
+const server = rpc.handler({
+    process: async () => {
+        return {
+            // Date objects
+            timestamp: new Date(),
+            
+            // Special values
+            special: {
+                inf: Infinity,
+                nan: NaN,
+                undef: undefined
+            },
+            
+            // Arrays and objects
+            array: [1, , 3],      // Sparse array
+            nested: {
+                deep: {
+                    value: 1
+                }
+            },
+            
+            // Custom serialization
+            custom: {
+                toJSON() {
+                    return 'serialized';
+                }
+            }
+        };
+    }
+});
 ```
 
 ## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## Acknowledgements
-
-Special thanks to all the contributors who have helped in the development of this project.
 
 ## Contact
 
