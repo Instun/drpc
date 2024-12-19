@@ -74,16 +74,13 @@ const sum = await client.add(1, 2);
 const profile = await client.user.profile.get(123);
 ```
 
-### Method Routing and Middleware
+### Method Routing and Chain Mode
 
-Method routing in @instun/drpc provides a powerful and flexible way to organize your RPC endpoints. The routing system supports:
-- Nested namespaces for logical grouping
-- Method chaining
-- Parameter validation and transformation
-- Various parameter types and return values
-- Primitive values as handlers
+@instun/drpc provides a powerful routing system that supports both traditional method routing and chain mode processing:
 
-Example implementation:
+#### Basic Method Routing
+
+Method routing in @instun/drpc provides a flexible way to organize your RPC endpoints:
 
 ```js
 const server = rpc.handler({
@@ -97,47 +94,72 @@ const server = rpc.handler({
             get: async (userId) => ({ id: userId, name: 'John' }),
             update: async (userId, data) => ({ success: true })
         }
-    },
-
-    // Method chaining
-    math: {
-        add: async (a, b) => a + b,
-        multiply: async (a, b) => a * b
-    },
-    string: {
-        concat: async (a, b) => a + b,
-        reverse: async (str) => str.split('').reverse().join('')
-    },
-
-    // Different parameter types
-    echo: {
-        string: str => str,
-        number: num => num,
-        boolean: bool => bool,
-        object: obj => obj,
-        array: arr => arr,
-        null: val => val
-    },
-
-    // Primitive values as handlers
-    version: '1.0.0',            // 返回字符串
-    maxConnections: 100,         // 返回数字
-    isEnabled: true,             // 返回布尔值
-    defaultConfig: {             // 嵌套的原始值
-        name: 'default',
-        timeout: 3000,
-        debug: false
     }
 });
-
-// Client usage
-const result1 = await client.add(1, 2);                    // 3
-const result2 = await client.math.multiply(2, 3);          // 6
-const result3 = await client.string.reverse('hello');      // 'olleh'
-const result4 = await client.echo.object({ foo: 'bar' });  // { foo: 'bar' }
-const version = await client.version();                    // '1.0.0'
-const timeout = await client.defaultConfig.timeout();      // 3000
 ```
+
+#### Chain Mode Processing
+
+Chain mode extends the basic routing by allowing handlers to modify parameters and share state:
+
+- **Parameter Modification**
+  - Use `this.method` to modify parameters for the next handler in the chain
+  - Transform and validate data between handlers
+  - Control the flow of data through the chain
+
+- **State Management**
+  - Use `this.invoke[]` to share data between different calls
+  - Maintain connection-specific context
+  - Store session data like authentication tokens
+
+Example of chain mode:
+
+```js
+const server = rpc.handler({
+    user: {
+        // First handler in chain
+        validate: async function(userId, data) {
+            if (!this.invoke['session']) {
+                throw new Error('No session');
+            }
+            // Modify parameters for the next handler
+            this.method = [userId, { ...data, validated: true }];
+        },
+        
+        // Second handler receives modified parameters
+        process: async function(userId, data) {
+            console.log(data.validated); // true
+            const result = await processUser(userId, data);
+            // Pass processed result to next handler
+            this.method = [result];
+        },
+        
+        // Final handler in chain
+        respond: async function(result) {
+            return {
+                success: true,
+                data: result,
+                session: this.invoke['session']
+            };
+        }
+    },
+
+    auth: {
+        login: async function(credentials) {
+            const session = await authenticate(credentials);
+            // Store session for other calls
+            this.invoke['session'] = session;
+            return { success: true };
+        }
+    }
+});
+```
+
+In this example:
+1. The `validate` handler checks the session and enhances the input data
+2. The `process` handler receives the modified parameters and processes them
+3. The `respond` handler formats the final response with session information
+4. The `auth.login` handler demonstrates how to share session state between different calls
 
 ### Bidirectional Communication
 
