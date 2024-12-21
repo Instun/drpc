@@ -694,4 +694,161 @@ describe('Handler Chain Tests', () => {
         const result = await client.contextSharing.get('testKey');
         assert.deepStrictEqual(result, { key: 'testKey', value: testValue });
     });
+
+    it('should handle fuzzy matching with longest prefix', async () => {
+        const conn = createConnection(conn => {
+            open(conn, {
+                opened: true,
+                routing: {
+                    // Generic user handler
+                    "user": async function() {
+                        // Store original method for testing
+                        this.params[0] = {
+                            originalMethod: this.method,
+                            ...this.params[0],
+                            processed: true
+                        };
+                        // Return modified params
+                        return this.params[0];
+                    },
+                    
+                    // More specific handler
+                    "user.special": async function(data) {
+                        return { special: true, data };
+                    },
+
+                    // Nested handlers
+                    "api": {
+                        "v1": async function() {
+                            this.params[0] = {
+                                version: 'v1',
+                                ...this.params[0]
+                            };
+                            return this.params[0];
+                        },
+                        "v2": {
+                            process: async function(data) {
+                                return {
+                                    version: 'v2',
+                                    data
+                                };
+                            }
+                        }
+                    }
+                }
+            });
+        }, { opened: true });
+
+        const client = open(conn, { opened: true });
+
+        // Test generic user handler
+        const userResult = await client.user.profile.get({ name: 'test' });
+        assert.deepStrictEqual(userResult, {
+            originalMethod: 'profile.get',
+            name: 'test',
+            processed: true
+        }, 'should handle generic user path with remaining method');
+
+        // Test specific handler taking precedence
+        const specialResult = await client.user.special({ type: 'test' });
+        assert.deepStrictEqual(specialResult, {
+            special: true,
+            data: { type: 'test' }
+        }, 'specific handler should take precedence');
+
+        // Test nested API versioning
+        const v1Result = await client.api.v1.users.list({ page: 1 });
+        assert.deepStrictEqual(v1Result, {
+            version: 'v1',
+            page: 1
+        }, 'should handle v1 API prefix');
+
+        const v2Result = await client.api.v2.process({ data: 'test' });
+        assert.deepStrictEqual(v2Result, {
+            version: 'v2',
+            data: { data: 'test' }
+        }, 'should handle v2 API specific method');
+    });
+
+    it('should handle fuzzy matching in middleware chains', async () => {
+        const conn = createConnection(conn => {
+            open(conn, {
+                opened: true,
+                routing: {
+                    api: [
+                        // Version middleware
+                        async function() {
+                            const version = this.method.split('.')[0];
+                            if (version === 'v1' || version === 'v2') {
+                                this.params[0] = {
+                                    version,
+                                    ...this.params[0]
+                                };
+                            }
+                        },
+                        // Auth middleware
+                        async function() {
+                            if (this.params[0]?.auth === false) {
+                                throw new Error('Unauthorized');
+                            }
+                            this.params[0] = {
+                                authenticated: true,
+                                ...this.params[0]
+                            };
+                        },
+                        // Route handlers
+                        {
+                            "v1.users": async function(data) {
+                                return {
+                                    path: 'v1.users',
+                                    data
+                                };
+                            },
+                            "v2.users": async function(data) {
+                                return {
+                                    path: 'v2.users',
+                                    data
+                                };
+                            }
+                        }
+                    ]
+                }
+            });
+        }, { opened: true });
+
+        const client = open(conn, { opened: true });
+
+        // Test v1 API with auth
+        const v1Result = await client.api.v1.users({ auth: true });
+        assert.deepStrictEqual(v1Result, {
+            path: 'v1.users',
+            data: {
+                version: 'v1',
+                auth: true,
+                authenticated: true
+            }
+        }, 'should process v1 request through middleware chain');
+
+        // Test v2 API with auth
+        const v2Result = await client.api.v2.users({ auth: true });
+        assert.deepStrictEqual(v2Result, {
+            path: 'v2.users',
+            data: {
+                version: 'v2',
+                auth: true,
+                authenticated: true
+            }
+        }, 'should process v2 request through middleware chain');
+
+        // Test unauthorized access
+        await assert.rejects(
+            async () => {
+                await client.api.v1.users({ auth: false });
+            },
+            {
+                message: 'Unauthorized'
+            },
+            'should reject unauthorized request'
+        );
+    });
 });

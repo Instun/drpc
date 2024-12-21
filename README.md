@@ -1,344 +1,299 @@
-# @instun/drpc
+# DRPC
 
-## Overview
-
-@instun/drpc is a lightweight, flexible, and efficient library for handling JSON-RPC communication across various JavaScript environments. Built with a focus on performance and reliability, it provides a unified interface for remote procedure calls in web browsers, Node.js, Fibjs, and React Native applications. The library supports a wide range of connection objects, including WebSocket, WebRTC, IPC, Worker, and custom message queues, making it versatile enough for everything from real-time web applications to complex server-side systems.
+A lightweight, bi-directional RPC library with support for method routing, middleware chains, and error handling.
 
 ## Features
 
-- **Cross-Platform Support**
-  - Web browsers (modern and legacy)
-  - Node.js and Fibjs environments
-  - React Native compatibility
-  - Electron and NW.js support
-  - Universal module support (UMD)
-
-- **Transport Layer Support**
-  - WebSocket integration
-  - WebRTC data channels
-  - Inter-process communication (IPC)
-  - Web Workers messaging
-  - Custom transport protocols
-
-- **Development Experience**
-  - Simple and intuitive API
-  - Comprehensive documentation
-  - Built-in testing utilities
-  - TypeScript support
-  - Debugging tools
-
-- **Security**
-  - Input validation
-  - Request sanitization
-  - Rate limiting support
-  - Timeout handling
-  - Session management
+- Bi-directional RPC communication
+- Method routing with middleware support
+- Handler chains with parameter modification
+- Automatic reconnection
+- Error handling and propagation
+- Comprehensive type support
+- Connection state management
 
 ## Installation
 
-You can install @instun/drpc via npm:
-
-```sh
-npm install @instun/drpc
+```bash
+fibjs --install @instun/drpc
 ```
 
-## Usage Guide
-
-### Basic Setup
-
-The library provides a clean and intuitive API for both client and server implementations. You can quickly set up RPC communication with just a few lines of code:
+## Basic Usage
 
 ```js
-const rpc = require('@instun/drpc');
-const ws = require('ws');
-const http = require('http');
+const { open } = require('@instun/drpc');
 
-// Server setup
-const server = new http.Server(8811, ws.upgrade(rpc.handler({
-    add: async (a, b) => a + b,
-    user: {
-        profile: {
-            get: async (userId) => ({ id: userId, name: 'John' })
-        }
+// Server-side handler
+const server = open(connection, {
+    routing: {
+        add: (a, b) => a + b,
+        echo: msg => msg
     }
-})));
-
-// Client setup
-const client = rpc.open(() => new ws.Socket('ws://127.0.0.1:8811'), {
-    timeout: 5000,
-    maxRetries: 3
 });
+
+// Client-side connection
+const client = open(connection);
 
 // Make RPC calls
-const sum = await client.add(1, 2);
-const profile = await client.user.profile.get(123);
+const result = await client.add(1, 2);  // Returns 3
+const echo = await client.echo('test'); // Returns 'test'
 ```
 
-### Method Routing and Chain Mode
+## Method Routing
 
-@instun/drpc provides a powerful routing system that supports both traditional method routing and chain mode processing:
+### Basic Routing
 
-#### Basic Method Routing
-
-Method routing in @instun/drpc provides a flexible way to organize your RPC endpoints:
+Methods can be organized in a nested structure:
 
 ```js
-const server = rpc.handler({
-    // Basic methods
-    add: async (a, b) => a + b,
-    multiply: async (a, b) => a * b,
-
-    // Nested namespaces
-    user: {
-        profile: {
-            get: async (userId) => ({ id: userId, name: 'John' }),
-            update: async (userId, data) => ({ success: true })
-        }
-    }
-});
-```
-
-#### Chain Mode Processing
-
-Chain mode extends the basic routing by allowing handlers to modify parameters and share state:
-
-- **Parameter Modification**
-  - Use `this.method` to modify parameters for the next handler in the chain
-  - Transform and validate data between handlers
-  - Control the flow of data through the chain
-
-- **State Management**
-  - Use `this.invoke[]` to share data between different calls
-  - Maintain connection-specific context
-  - Store session data like authentication tokens
-
-Example of chain mode:
-
-```js
-const server = rpc.handler({
-    user: {
-        // First handler in chain
-        validate: async function(userId, data) {
-            if (!this.invoke['session']) {
-                throw new Error('No session');
+const server = open(connection, {
+    routing: {
+        math: {
+            add: (a, b) => a + b,
+            multiply: (a, b) => a * b
+        },
+        user: {
+            profile: {
+                get: id => ({ id, name: 'Test' }),
+                update: (id, data) => ({ ...data, id })
             }
-            // Modify parameters for the next handler
-            this.method = [userId, { ...data, validated: true }];
-        },
-        
-        // Second handler receives modified parameters
-        process: async function(userId, data) {
-            console.log(data.validated); // true
-            const result = await processUser(userId, data);
-            // Pass processed result to next handler
-            this.method = [result];
-        },
-        
-        // Final handler in chain
-        respond: async function(result) {
-            return {
-                success: true,
-                data: result,
-                session: this.invoke['session']
-            };
-        }
-    },
-
-    auth: {
-        login: async function(credentials) {
-            const session = await authenticate(credentials);
-            // Store session for other calls
-            this.invoke['session'] = session;
-            return { success: true };
         }
     }
 });
+
+// Client usage
+await client.math.add(1, 2);
+await client.user.profile.get(123);
 ```
 
-In this example:
-1. The `validate` handler checks the session and enhances the input data
-2. The `process` handler receives the modified parameters and processes them
-3. The `respond` handler formats the final response with session information
-4. The `auth.login` handler demonstrates how to share session state between different calls
+### Handler Chains
 
-### Bidirectional Communication
+Handler chains allow you to process requests through multiple handlers, with each handler modifying the parameters before passing them to the next handler:
 
-The library supports full-duplex RPC communication, allowing both server and client to initiate calls. This enables:
+```js
+const server = open(connection, {
+    routing: {
+        transform: [
+            // First handler: convert to uppercase
+            async function(text) {
+                this.params[0] = text.toUpperCase();
+            },
+            // Second handler: add exclamation mark
+            async function(text) {
+                this.params[0] = text + '!';
+            },
+            // Last handler: return final result
+            async function(text) {
+                return `[${text}]`;
+            }
+        ],
+        
+        processNumbers: [
+            // First handler: double the number
+            async function(num) {
+                this.params[0] = num * 2;
+            },
+            // Second handler: add 5
+            async function(num) {
+                this.params[0] = num + 5;
+            },
+            // Last handler: format result
+            async function(num) {
+                return `Result: ${num}`;
+            }
+        ]
+    }
+});
+
+// Usage:
+const result1 = await client.transform('hello');
+console.log(result1); // '[HELLO!]'
+
+const result2 = await client.processNumbers(10);
+console.log(result2); // 'Result: 25' (10 * 2 + 5)
+```
+
+### Handler Chain Rules
+
+1. Only the last handler in a chain can return a value
+2. Intermediate handlers must modify parameters using `this.params`
+3. Each handler has access to:
+   - `this.method`: Current method path
+   - `this.params`: Array of method parameters
+   - `this.invoke`: For making nested RPC calls
+
+```js
+const server = open(connection, {
+    routing: [
+        // Middleware for logging
+        async function() {
+            console.log(`Called: ${this.method}`);
+            console.log(`Params:`, this.params);
+        },
+        
+        // Middleware for parameter validation
+        async function() {
+            if (!this.params[0]) {
+                throw new Error('Missing required parameter');
+            }
+            // Modify parameters for next handler
+            this.params[0] = { validated: true, ...this.params[0] };
+        },
+        
+        // Final handler
+        {
+            process: async function(data) {
+                return { result: 'success', data };
+            }
+        }
+    ]
+});
+```
+
+### Fuzzy Matching in Handler Chains
+
+The library supports flexible method routing with fuzzy matching, where a handler can process multiple method paths using a common prefix:
+
+```js
+const server = open(connection, {
+    routing: [
+        function() {
+            console.log(`Processing: ${this.method}`);
+            this.params[0] = { ...this.params[0], processed: true };
+        },
+        {
+            // Handle all methods under "user.*"
+            "user": async function() {
+                // If client calls "user.profile.get",
+                // this.method will be "profile.get"
+                console.log(`Processing: ${this.method}`);
+                this.params[0] = { ...this.params[0], processed: true };
+            },
+            
+            // Specific handlers still take precedence
+            "user.special": async function(data) {
+                return { special: true, data };
+            },
+            // Handle all methods under "admin.*"
+            "admin": [
+                function() {
+                    // If client calls "admin.add_user",
+                    // this.method will be "add_user"
+                    console.log(`Processing: ${this.method}`);
+                    this.params[0] = { ...this.params[0], processed: true };
+                },
+                {
+                    "add_user": async function(data) {
+                        return { success: true, data };
+                    }   ,
+                    "remove_user": async function(data) {
+                        return { success: true, data };
+                    }
+                }
+            ]
+        }
+    ]
+});
+
+// Example flows:
+// 1. client.user.profile.get({ name: 'test' })
+//    - Matches "user" handler
+//    - this.method is "profile.get"
+//    - Modifies params[0] to { name: 'test', processed: true }
+
+// 2. client.user.special({ type: 'test' })
+//    - Matches "user.special" handler directly
+//    - Returns { special: true, data: { type: 'test' } }
+
+// 3. client.admin.add_user({ id: 123 })
+//    - Matches "admin" handler
+//    - this.method is "add_user"
+//    - Modifies params[0] to { id: 123, processed: true }
+
+// 4. client.admin.remove_user({ id: 123 })
+//    - Matches "admin" handler
+//    - this.method is "remove_user"
+//    - Modifies params[0] to { id: 123, processed: true }
+```
+
+The router will find the longest matching prefix handler, which allows for flexible routing patterns like:
+- `user.*` - Handle all methods under user
+- `user.profile.*` - Handle all profile-related methods
+- `admin.*` - Handle all admin methods
+
+This is particularly useful for:
+- Implementing middleware for groups of methods
+- API versioning
+- Dynamic method handling
+- Request preprocessing
+- Access control by path patterns
+
+## Bidirectional Communication
+
+The library supports full-duplex RPC communication, allowing both server and client to initiate calls:
+
+```js
+// Server-side
+const server = open(connection, {
+    routing: {
+        // Server method that calls client
+        processWithCallback: async function(data) {
+            // Call client's transformData method
+            const result = await this.invoke.transformData(data);
+            return `Processed: ${result}`;
+        }
+    }
+});
+
+// Client-side
+const client = open(connection, {
+    // Client exposes methods for server to call
+    routing: {
+        transformData: async function(data) {
+            return data.toUpperCase();
+        }
+    }
+});
+
+// Example flow:
+// 1. Client initiates call
+const result = await client.processWithCallback('hello');
+console.log(result); 
+// Output: "Processed: HELLO"
+
+// 2. Server can also initiate calls to client's exposed methods
+// This happens automatically when server uses this.invoke
+```
+
+This enables:
 - Server push notifications
 - Real-time updates
 - Client-side API exposure
 - Callback-based workflows
 - Event-driven architectures
 
-Example implementation:
+## Connection Management
+
+### Auto Reconnection
 
 ```js
-// Server-side
-const server = rpc.handler({
-    notify: async function(message) {
-        // Call client's method
-        const response = await this.invoke.receive(message);
-        return `Sent: ${message}, Response: ${response}`;
-    }
-});
-
-// Client-side
-const client = rpc.open(connection, {
-    routing: {
-        receive: async (message) => {
-            console.log('Received:', message);
-            return 'Message acknowledged';
-        }
-    }
+const client = open(connection, {
+    timeout: 5000,      // Request timeout
+    maxRetries: 3,      // Max reconnection attempts
+    retryDelay: 1000    // Delay between attempts
 });
 ```
 
-### State Management
-
-The connection state management system provides:
-- Automatic connection recovery
-- Event-based state notifications
-- Configurable retry strategies
-- Connection pooling
-- Session persistence
-
-Example implementation:
+### Connection State
 
 ```js
-const client = rpc.open(connection, {
-    // Connection configuration
-    timeout: 5000,
-    maxRetries: 3,
-    retryDelay: 1000,
+// Get current connection state
+const state = client[Symbol.for('drpc.state')]();
 
-    // State management
+// Listen for state changes
+const client = open(connection, {
     onStateChange: (oldState, newState) => {
-        console.log(`State: ${oldState} -> ${newState}`);
-        switch (newState) {
-            case 'CONNECTED':
-                console.log('Connection established');
-                break;
-            case 'RECONNECTING':
-                console.log('Attempting to reconnect...');
-                break;
-            case 'CLOSED':
-                console.log('Connection closed');
-                break;
-        }
-    }
-});
-```
-
-### Error Handling
-
-The error handling system provides comprehensive error management with:
-- Standard JSON-RPC error codes
-- Custom error types and codes
-- Enhanced error information
-- Error stack preservation
-- Type-specific error handling
-
-Example implementation:
-
-```js
-const server = rpc.handler({
-    // Basic error throwing
-    throwError: () => {
-        throw new Error('Operation failed');
-    },
-
-    // Custom error with additional information
-    validateUser: (user) => {
-        const error = new Error('Invalid user data');
-        error.code = -32098;  // Custom error code
-        error.data = { field: 'email', reason: 'invalid format' };
-        throw error;
-    },
-
-    // Custom error types
-    handleRequest: (type) => {
-        class ValidationError extends Error {
-            constructor(message) {
-                super(message);
-                this.name = 'ValidationError';
-                this.code = -32099;
-                this.data = { type: 'validation' };
-            }
-        }
-
-        switch (type) {
-            case 'validation':
-                throw new ValidationError('Invalid input');
-            case 'type':
-                throw new TypeError('Invalid type');
-            default:
-                throw new Error('Unknown error');
-        }
-    }
-});
-
-// Client-side error handling
-try {
-    await client.validateUser({ email: 'invalid' });
-} catch (error) {
-    // Standard JSON-RPC error codes
-    switch (error.code) {
-        case -32700: console.log('Parse error');
-        case -32600: console.log('Invalid request');
-        case -32601: console.log('Method not found');
-        case -32602: console.log('Invalid params');
-        case -32603: console.log('Internal error');
-        default:     console.log('Custom error:', error.code);
-    }
-
-    // Access error details
-    console.log(error.message);  // Error message
-    console.log(error.code);     // Error code
-    console.log(error.data);     // Additional error data
-    console.log(error.stack);    // Error stack trace
-}
-```
-
-### Data Type Handling
-
-The library provides comprehensive support for JavaScript data types:
-- Date objects and timestamps
-- Special values (Infinity, NaN, undefined)
-- Complex nested objects
-- Sparse arrays
-- Custom serialization
-
-Example implementation:
-
-```js
-const server = rpc.handler({
-    process: async () => {
-        return {
-            // Date objects
-            timestamp: new Date(),
-            
-            // Special values
-            special: {
-                inf: Infinity,
-                nan: NaN,
-                undef: undefined
-            },
-            
-            // Arrays and objects
-            array: [1, , 3],      // Sparse array
-            nested: {
-                deep: {
-                    value: 1
-                }
-            },
-            
-            // Custom serialization
-            custom: {
-                toJSON() {
-                    return 'serialized';
-                }
-            }
-        };
+        console.log(`Connection state changed: ${oldState} -> ${newState}`);
     }
 });
 ```
@@ -346,7 +301,3 @@ const server = rpc.handler({
 ## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## Contact
-
-For any questions or feedback, please open an issue on our [GitHub repository](https://github.com/Instun/drpc).
