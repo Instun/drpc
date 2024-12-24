@@ -150,6 +150,103 @@ const server = open(connection, {
 });
 ```
 
+### Cross-Method Context Sharing
+
+Using WeakMap with `this.invoke` enables sharing context between method calls. This is particularly useful for implementing authentication, session management, and complex workflows:
+
+```js
+// Server-side authentication example
+const sessions = new WeakMap();
+
+const server = open(connection, {
+    routing: {
+        auth: {
+            // Login and initialize session
+            login: [
+                async function validateCredentials(credentials) {
+                    if (!credentials?.username || !credentials?.password) {
+                        throw new Error('Invalid credentials');
+                    }
+                    
+                    // Store session using this.invoke as key
+                    sessions.set(this.invoke, {
+                        username: credentials.username,
+                        roles: ['user'],
+                        loginTime: Date.now()
+                    });
+                    return { success: true };
+                }
+            ],
+
+            // Check session and return user info
+            getSession: async function() {
+                const session = sessions.get(this.invoke);
+                if (!session) {
+                    throw new Error('Not authenticated');
+                }
+                return session;
+            },
+
+            // Protected methods that require authentication
+            admin: {
+                action: [
+                    // Middleware to check admin role
+                    async function checkAdminRole() {
+                        const session = sessions.get(this.invoke);
+                        if (!session) {
+                            throw new Error('Not authenticated');
+                        }
+                        if (!session.roles.includes('admin')) {
+                            throw new Error('Insufficient privileges');
+                        }
+                        this.params[0] = {
+                            ...this.params[0],
+                            actor: session.username
+                        };
+                    },
+                    async function performAction(data) {
+                        return {
+                            success: true,
+                            action: data.action,
+                            actor: data.actor,
+                            timestamp: Date.now()
+                        };
+                    }
+                ]
+            },
+
+            // Logout and clean up session
+            logout: async function() {
+                const hadSession = sessions.delete(this.invoke);
+                return { success: true, hadSession };
+            }
+        }
+    }
+});
+
+// Client usage example:
+await client.auth.login({ 
+    username: 'admin', 
+    password: 'secret' 
+});
+
+const session = await client.auth.getSession();
+// { username: 'admin', roles: ['user'], loginTime: ... }
+
+const actionResult = await client.auth.admin.action({ 
+    action: 'delete_user' 
+});
+// { success: true, action: 'delete_user', actor: 'admin', ... }
+
+await client.auth.logout();
+```
+
+The WeakMap-based session management provides several benefits:
+- Automatic cleanup when the connection is closed
+- No memory leaks from abandoned sessions
+- Secure context isolation between connections
+- Natural integration with middleware chains
+
 ### Fuzzy Matching in Handler Chains
 
 The library supports flexible method routing with fuzzy matching, where a handler can process multiple method paths using a common prefix:

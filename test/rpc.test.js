@@ -3,6 +3,7 @@ require('./basic.test.js');
 require('./error.test.js');
 require('./objects.test.js');
 require('./handlers.test.js');
+require('./context.test.js');
 require('./bidirectional.test.js');
 require('./connection.test.js');
 require('./performance.test.js');

@@ -103,29 +103,6 @@ describe('Handler Chain Tests', () => {
         assert.strictEqual(result2, 'Result: 25'); // (10 * 2) + 5 = 25
     });
 
-    it('should preserve context in handler chain', async () => {
-        const conn = createConnection(conn => {
-            open(conn, {
-                opened: true,
-                routing: {
-                    contextTest: [
-                        async function() {
-                            // The RPC message context should include method name
-                            assert.strictEqual(this.method, 'contextTest');
-                            // Params should be an array
-                            assert.ok(Array.isArray(this.params));
-                            return 'success';
-                        }
-                    ]
-                }
-            });
-        }, { opened: true });
-
-        const client = open(conn);
-        const result = await client.contextTest();
-        assert.strictEqual(result, 'success');
-    });
-
     it('should enforce handler chain return value rules', async () => {
         const conn = createConnection(conn => {
             open(conn, {
@@ -290,120 +267,6 @@ describe('Handler Chain Tests', () => {
         assert.strictEqual(apiResult, 'api root', 'should handle root level default handler');
     });
 
-    it('should handle middleware error recovery', async () => {
-        const conn = createConnection(conn => {
-            open(conn, {
-                opened: true,
-                routing: {
-                    // 测试中间件错误恢复
-                    errorRecovery: [
-                        async function maybeError(shouldError) {
-                            if (shouldError) {
-                                const err = new Error('Middleware error');
-                                err.code = -32000;
-                                err.data = { type: 'MIDDLEWARE' };
-                                throw err;
-                            }
-                            this.params[0] = 'recovered';
-                        },
-                        async function errorHandler(err) {
-                            if (err instanceof Error && err.data?.type === 'MIDDLEWARE') {
-                                throw err;  // 重新抛出错误，让调用者处理
-                            }
-                            return this.params[0];  // 返回处理过的参数
-                        }
-                    ]
-                }
-            });
-        }, { opened: true });
-
-        const client = open(conn, { opened: true });
-
-        // 测试错误恢复
-        try {
-            await client.errorRecovery(true);
-            assert.fail('Should throw error');
-        } catch (err) {
-            assert.strictEqual(err.message, 'Middleware error');
-            assert.strictEqual(err.code, -32000);
-            assert.deepStrictEqual(err.data, { type: 'MIDDLEWARE' });
-        }
-
-        const errorResult2 = await client.errorRecovery(false);
-        assert.strictEqual(errorResult2, 'recovered');
-    });
-
-    it('should handle middleware context sharing', async () => {
-        // 创建一个共享上下文
-        const sharedContext = {
-            values: new Map(),
-            getContext(key) {
-                return this.values.get(key);
-            },
-            setContext(key, value) {
-                this.values.set(key, value);
-            }
-        };
-
-        const conn = createConnection(conn => {
-            open(conn, {
-                opened: true,
-                routing: {
-                    // 测试中间件上下文共享
-                    contextSharing: {
-                        set: [
-                            async function validateKey(key) {
-                                if (typeof key !== 'string') {
-                                    throw new Error('Invalid key');
-                                }
-                                this.params[0] = key;
-                            },
-                            async function setValue(key) {
-                                const value = Date.now();
-                                sharedContext.setContext(key, value);
-                                this.params[0] = { key, value };
-                            },
-                            async function returnSetValue(data) {
-                                return { key: data.key, set: true };
-                            }
-                        ],
-                        get: [
-                            async function validateKey(key) {
-                                if (typeof key !== 'string') {
-                                    throw new Error('Invalid key');
-                                }
-                                this.params[0] = key;
-                            },
-                            async function getValue(key) {
-                                const value = sharedContext.getContext(key);
-                                if (!value) {
-                                    throw new Error('Key not found');
-                                }
-                                this.params[0] = { key, value };
-                            },
-                            async function returnGetValue(data) {
-                                return data;
-                            }
-                        ]
-                    }
-                }
-            });
-        }, { opened: true });
-
-        const client = open(conn, { opened: true });
-
-        // 测试上下文共享
-        await client.contextSharing.set('testKey');
-        const contextResult = await client.contextSharing.get('testKey');
-        assert.ok(contextResult.value > 0);
-        assert.strictEqual(contextResult.key, 'testKey');
-
-        await assert.rejects(
-            () => client.contextSharing.get('nonexistent'),
-            { message: 'Key not found' }
-        );
-    });
-
     it('should handle conditional middleware', async () => {
         const conn = createConnection(conn => {
             open(conn, {
@@ -488,47 +351,6 @@ describe('Handler Chain Tests', () => {
             extended: true,
             final: true 
         });
-    });
-
-    it('should handle middleware context tracking', async () => {
-        // 创建一个上下文追踪器
-        const contextTracker = {
-            contexts: [],
-            add(context) {
-                this.contexts.push(context);
-            },
-            clear() {
-                this.contexts = [];
-            }
-        };
-
-        const conn = createConnection(conn => {
-            open(conn, {
-                opened: true,
-                routing: {
-                    // 测试中间件上下文追踪
-                    contextTracking: [
-                        async function firstHandler() {
-                            contextTracker.add('first');
-                        },
-                        async function secondHandler() {
-                            contextTracker.add('second');
-                            return 'tracked';
-                        }
-                    ]
-                }
-            });
-        }, { opened: true });
-
-        const client = open(conn, { opened: true });
-
-        // 清除追踪器
-        contextTracker.clear();
-
-        // 测试中间件上下文追踪
-        const result = await client.contextTracking();
-        assert.strictEqual(result, 'tracked');
-        assert.deepStrictEqual(contextTracker.contexts, ['first', 'second']);
     });
 
     it('should handle nested routing with middleware', async () => {
@@ -652,47 +474,6 @@ describe('Handler Chain Tests', () => {
             { message: 'Invalid setting' }
         );
         assert.deepStrictEqual(contextTracker.contexts, ['validate-setting']);
-    });
-
-    it('should handle context sharing between middlewares', async () => {
-        const sharedContext = {
-            values: new Map(),
-            getContext(key) {
-                return this.values.get(key);
-            },
-            setContext(key, value) {
-                this.values.set(key, value);
-            }
-        };
-
-        const conn = createConnection(conn => {
-            open(conn, {
-                opened: true,
-                routing: {
-                    contextSharing: {
-                        get: [
-                            async function getContextValue(key) {
-                                const value = sharedContext.getContext(key);
-                                this.params[0] = { key, value };
-                            },
-                            async function returnValue(data) {
-                                return data;
-                            }
-                        ]
-                    }
-                }
-            });
-        }, { opened: true });
-
-        const client = open(conn, { opened: true });
-
-        // 设置共享上下文
-        const testValue = 'test-value';
-        sharedContext.setContext('testKey', testValue);
-
-        // 测试中间件间的上下文共享
-        const result = await client.contextSharing.get('testKey');
-        assert.deepStrictEqual(result, { key: 'testKey', value: testValue });
     });
 
     it('should handle fuzzy matching with longest prefix', async () => {

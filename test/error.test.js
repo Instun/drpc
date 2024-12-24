@@ -418,4 +418,47 @@ describe('Error Handling Tests', () => {
             assert.strictEqual(err.message, 'Second error: First error');
         }
     });
+
+    it('should handle middleware error recovery', async () => {
+        const conn = createConnection(conn => {
+            open(conn, {
+                opened: true,
+                routing: {
+                    // 测试中间件错误恢复
+                    errorRecovery: [
+                        async function maybeError(shouldError) {
+                            if (shouldError) {
+                                const err = new Error('Middleware error');
+                                err.code = -32000;
+                                err.data = { type: 'MIDDLEWARE' };
+                                throw err;
+                            }
+                            this.params[0] = 'recovered';
+                        },
+                        async function errorHandler(err) {
+                            if (err instanceof Error && err.data?.type === 'MIDDLEWARE') {
+                                throw err;  // 重新抛出错误，让调用者处理
+                            }
+                            return this.params[0];  // 返回处理过的参数
+                        }
+                    ]
+                }
+            });
+        }, { opened: true });
+
+        const client = open(conn, { opened: true });
+
+        // 测试错误恢复
+        try {
+            await client.errorRecovery(true);
+            assert.fail('Should throw error');
+        } catch (err) {
+            assert.strictEqual(err.message, 'Middleware error');
+            assert.strictEqual(err.code, -32000);
+            assert.deepStrictEqual(err.data, { type: 'MIDDLEWARE' });
+        }
+
+        const errorResult2 = await client.errorRecovery(false);
+        assert.strictEqual(errorResult2, 'recovered');
+    });
 });
