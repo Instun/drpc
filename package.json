@@ -1,6 +1,6 @@
 {
   "name": "@instun/drpc",
-  "version": "4.1.0",
+  "version": "4.2.1",
   "description": "A lightweight, flexible, and efficient library for handling JSON-RPC communication across various JavaScript environments with broad connection object compatibility.",
   "main": "lib/index.js",
   "repository": {

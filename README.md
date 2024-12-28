@@ -1,18 +1,19 @@
 # DRPC
 
-A lightweight, bi-directional RPC library with support for method routing, middleware chains, and error handling.
+A lightweight, bi-directional RPC library for Node.js and fibjs.
 
 ## Features
 
 - Bi-directional RPC communication
-- Method routing with middleware support
-- Handler chains with parameter modification
-- Automatic reconnection
-- Error handling and propagation
-- Comprehensive type support
-- Connection state management
+- Flexible method routing with middleware support
+- Handler chains with parameter transformation
+- Automatic connection management
+- Comprehensive TypeScript support
+- Built-in error handling and propagation
 
 ## Installation
+
+Install DRPC library using the fibjs package manager. Compatible with both Node.js and fibjs environments.
 
 ```bash
 fibjs --install @instun/drpc
@@ -20,236 +21,155 @@ fibjs --install @instun/drpc
 
 ## Basic Usage
 
+RPC enables seamless communication between services:
+- Service Discovery: Automatically find and connect to services
+- API Gateway: Act as an entry point for microservices
+- Load Balancing: Distribute requests across multiple servers
+- Protocol Translation: Bridge different communication protocols
+
+DRPC enables bi-directional communication between server and client. The server defines methods that clients can call directly as if they were local functions.
+
 ```js
 const { open } = require('@instun/drpc');
 
-// Server-side handler
+// Server setup
 const server = open(connection, {
-    routing: {
-        add: (a, b) => a + b,
-        echo: msg => msg
-    }
+  routing: {
+    add: (a, b) => a + b,
+    echo: msg => msg
+  }
 });
 
-// Client-side connection
+// Client setup
 const client = open(connection);
 
-// Make RPC calls
-const result = await client.add(1, 2);  // Returns 3
-const echo = await client.echo('test'); // Returns 'test'
+// Making RPC calls
+const sum = await client.add(1, 2);    // Returns: 3
+const msg = await client.echo('test'); // Returns: 'test'
 ```
 
 ## Method Routing
 
 ### Basic Routing
 
-Methods can be organized in a nested structure:
+Organize your APIs with nested routing for:
+- Resource Management: Group related resources
+- Version Control: Manage API versions
+- Access Control: Route-based permissions
+- Service Aggregation: Combine multiple backend services
+
+The routing system supports nested method definitions, allowing you to organize related methods under the same namespace. For example, group all math operations under `math` and user-related methods under `user`.
 
 ```js
 const server = open(connection, {
-    routing: {
-        math: {
-            add: (a, b) => a + b,
-            multiply: (a, b) => a * b
-        },
-        user: {
-            profile: {
-                get: id => ({ id, name: 'Test' }),
-                update: (id, data) => ({ ...data, id })
-            }
-        }
+  routing: {
+    math: {
+      add: (a, b) => a + b,
+      multiply: (a, b) => a * b
+    },
+    user: {
+      get: id => ({ id, name: 'User' }),
+      update: (id, data) => ({ ...data, id })
     }
+  }
 });
 
 // Client usage
-await client.math.add(1, 2);
-await client.user.profile.get(123);
+const sum = await client.math.add(1, 2);
+const user = await client.user.get(123);
 ```
 
 ### Handler Chains
 
-Handler chains allow you to process requests through multiple handlers, with each handler modifying the parameters before passing them to the next handler:
+Transform and process requests through multiple stages:
+- Data Pipeline: Multi-step data transformations
+- Authentication: Multi-layer security checks
+- Format Conversion: Transform between different data formats
+- Audit Trail: Track changes through processing stages
+- Rate Limiting: Control request flow at different stages
+
+Handler chains allow processing a request through multiple handlers. Each handler can modify parameters before passing them to the next handler, with the final handler returning the result. This is particularly useful for implementing data transformation, validation, logging, and more.
 
 ```js
 const server = open(connection, {
-    routing: {
-        transform: [
-            // First handler: convert to uppercase
-            async function(text) {
-                this.params[0] = text.toUpperCase();
-            },
-            // Second handler: add exclamation mark
-            async function(text) {
-                this.params[0] = text + '!';
-            },
-            // Last handler: return final result
-            async function(text) {
-                return `[${text}]`;
-            }
-        ],
-        
-        processNumbers: [
-            // First handler: double the number
-            async function(num) {
-                this.params[0] = num * 2;
-            },
-            // Second handler: add 5
-            async function(num) {
-                this.params[0] = num + 5;
-            },
-            // Last handler: format result
-            async function(num) {
-                return `Result: ${num}`;
-            }
-        ]
-    }
-});
-
-// Usage:
-const result1 = await client.transform('hello');
-console.log(result1); // '[HELLO!]'
-
-const result2 = await client.processNumbers(10);
-console.log(result2); // 'Result: 25' (10 * 2 + 5)
-```
-
-### Handler Chain Rules
-
-1. Only the last handler in a chain can return a value
-2. Intermediate handlers must modify parameters using `this.params`
-3. Each handler has access to:
-   - `this.method`: Current method path
-   - `this.params`: Array of method parameters
-   - `this.invoke`: For making nested RPC calls
-
-```js
-const server = open(connection, {
-    routing: [
-        // Middleware for logging
-        async function() {
-            console.log(`Called: ${this.method}`);
-            console.log(`Params:`, this.params);
-        },
-        
-        // Middleware for parameter validation
-        async function() {
-            if (!this.params[0]) {
-                throw new Error('Missing required parameter');
-            }
-            // Modify parameters for next handler
-            this.params[0] = { validated: true, ...this.params[0] };
-        },
-        
-        // Final handler
-        {
-            process: async function(data) {
-                return { result: 'success', data };
-            }
-        }
+  routing: {
+    process: [
+      // Transform input
+      async function(text) {
+        this.params[0] = text.toUpperCase();
+      },
+      // Add suffix
+      async function(text) {
+        this.params[0] = `${text}!`;
+      },
+      // Final handler
+      async function(text) {
+        return `[${text}]`;
+      }
     ]
+  }
 });
+
+// Usage
+const result = await client.process('hello');
+// Returns: '[HELLO!]'
 ```
 
-### Cross-Method Context Sharing
+### Middleware Support
 
-Using WeakMap with `this.invoke` enables sharing context between method calls. This is particularly useful for implementing authentication, session management, and complex workflows:
+Common middleware applications:
+- Request Logging: Track all API calls
+- Performance Monitoring: Measure response times
+- Circuit Breaking: Prevent cascade failures
+- Request Correlation: Track requests across services
+- Caching: Cache responses at different levels
+- Error Handling: Centralize error processing
+
+Middleware provides a unified way to process requests. Use middleware to implement:
+- Request logging
+- Parameter validation
+- Error handling
+- Access control
+- Performance monitoring
 
 ```js
-// Server-side authentication example
-const sessions = new WeakMap();
-
 const server = open(connection, {
-    routing: {
-        auth: {
-            // Login and initialize session
-            login: [
-                async function validateCredentials(credentials) {
-                    if (!credentials?.username || !credentials?.password) {
-                        throw new Error('Invalid credentials');
-                    }
-                    
-                    // Store session using this.invoke as key
-                    sessions.set(this.invoke, {
-                        username: credentials.username,
-                        roles: ['user'],
-                        loginTime: Date.now()
-                    });
-                    return { success: true };
-                }
-            ],
-
-            // Check session and return user info
-            getSession: async function() {
-                const session = sessions.get(this.invoke);
-                if (!session) {
-                    throw new Error('Not authenticated');
-                }
-                return session;
-            },
-
-            // Protected methods that require authentication
-            admin: {
-                action: [
-                    // Middleware to check admin role
-                    async function checkAdminRole() {
-                        const session = sessions.get(this.invoke);
-                        if (!session) {
-                            throw new Error('Not authenticated');
-                        }
-                        if (!session.roles.includes('admin')) {
-                            throw new Error('Insufficient privileges');
-                        }
-                        this.params[0] = {
-                            ...this.params[0],
-                            actor: session.username
-                        };
-                    },
-                    async function performAction(data) {
-                        return {
-                            success: true,
-                            action: data.action,
-                            actor: data.actor,
-                            timestamp: Date.now()
-                        };
-                    }
-                ]
-            },
-
-            // Logout and clean up session
-            logout: async function() {
-                const hadSession = sessions.delete(this.invoke);
-                return { success: true, hadSession };
-            }
-        }
+  routing: [
+    // Logging middleware
+    async function() {
+      console.log(`Method: ${this.method}`);
+      console.log(`Params:`, this.params);
+    },
+    
+    // Validation middleware
+    async function() {
+      const data = this.params[0];
+      if (!data) throw new Error('Invalid input');
+      this.params[0] = { validated: true, ...data };
+    },
+    
+    // Route handlers
+    {
+      'user.create': async function(data) {
+        return { success: true, user: data };
+      },
+      'user.delete': async function(id) {
+        return { success: true, id };
+      }
     }
+  ]
 });
-
-// Client usage example:
-await client.auth.login({ 
-    username: 'admin', 
-    password: 'secret' 
-});
-
-const session = await client.auth.getSession();
-// { username: 'admin', roles: ['user'], loginTime: ... }
-
-const actionResult = await client.auth.admin.action({ 
-    action: 'delete_user' 
-});
-// { success: true, action: 'delete_user', actor: 'admin', ... }
-
-await client.auth.logout();
 ```
-
-The WeakMap-based session management provides several benefits:
-- Automatic cleanup when the connection is closed
-- No memory leaks from abandoned sessions
-- Secure context isolation between connections
-- Natural integration with middleware chains
 
 ### Fuzzy Matching in Handler Chains
 
-The library supports flexible method routing with fuzzy matching, where a handler can process multiple method paths using a common prefix:
+The library supports flexible method routing with fuzzy matching, allowing handlers to process multiple method paths using common prefixes. This feature enables:
+- Group-level middleware implementation
+- Dynamic route handling
+- Pattern-based access control
+- API version management
+- Request preprocessing by path patterns
+- Hierarchical route organization
 
 ```js
 const server = open(connection, {
@@ -267,10 +187,11 @@ const server = open(connection, {
                 this.params[0] = { ...this.params[0], processed: true };
             },
             
-            // Specific handlers still take precedence
+            // Specific handlers take precedence
             "user.special": async function(data) {
                 return { special: true, data };
             },
+            
             // Handle all methods under "admin.*"
             "admin": [
                 function() {
@@ -282,7 +203,7 @@ const server = open(connection, {
                 {
                     "add_user": async function(data) {
                         return { success: true, data };
-                    }   ,
+                    },
                     "remove_user": async function(data) {
                         return { success: true, data };
                     }
@@ -303,73 +224,205 @@ const server = open(connection, {
 //    - Returns { special: true, data: { type: 'test' } }
 
 // 3. client.admin.add_user({ id: 123 })
-//    - Matches "admin" handler
-//    - this.method is "add_user"
-//    - Modifies params[0] to { id: 123, processed: true }
+//    - Matches "admin" handler chain
+//    - Processes through middleware first
+//    - Finally calls specific add_user handler
 
 // 4. client.admin.remove_user({ id: 123 })
-//    - Matches "admin" handler
-//    - this.method is "remove_user"
-//    - Modifies params[0] to { id: 123, processed: true }
+//    - Similar to add_user flow
+//    - Uses remove_user handler after middleware
 ```
 
-The router will find the longest matching prefix handler, which allows for flexible routing patterns like:
-- `user.*` - Handle all methods under user
-- `user.profile.*` - Handle all profile-related methods
-- `admin.*` - Handle all admin methods
+The router uses longest-prefix matching to find the most specific handler:
+- `user.*` matches all user-related methods
+- `user.profile.*` matches profile-specific methods
+- `admin.*` matches all admin methods
+- Exact matches take precedence over wildcards
 
-This is particularly useful for:
-- Implementing middleware for groups of methods
-- API versioning
-- Dynamic method handling
-- Request preprocessing
-- Access control by path patterns
+This pattern enables:
+- Hierarchical API organization
+- Granular access control
+- Common preprocessing for method groups
+- Version-specific handling
+- Dynamic route management
 
-## Bidirectional Communication
+## Context Management
 
-The library supports full-duplex RPC communication, allowing both server and client to initiate calls:
+DRPC provides two types of context management:
 
+### Handler Context
+
+Handler context is designed for request-scoped data sharing with these key features:
+- Scope: Limited to a single request's handler chain
+- Lifetime: From request start to response completion
+- Storage: In-memory, cleared after each request
+- Use Cases:
+  - Request timing and metrics
+  - Request-specific configuration
+  - Step-by-step data transformation
+  - Request validation state
+  - Temporary data caching
+
+Example: Multi-step data processing with context
 ```js
-// Server-side
 const server = open(connection, {
-    routing: {
-        // Server method that calls client
-        processWithCallback: async function(data) {
-            // Call client's transformData method
-            const result = await this.invoke.transformData(data);
-            return `Processed: ${result}`;
+  routing: {
+    processOrder: [
+      // Validation step
+      async function(order) {
+        this.context = {
+          startTime: Date.now(),
+          validations: []
+        };
+        
+        // Validate order
+        if (!order.items?.length) {
+          throw new Error('Empty order');
         }
-    }
+        this.context.validations.push('items');
+        
+        // Pass validated order to next handler
+        this.params[0] = order;
+      },
+      // Processing step
+      async function(order) {
+        // Calculate total
+        const total = order.items.reduce((sum, item) => sum + item.price, 0);
+        this.context.validations.push('pricing');
+        
+        // Update order with total
+        this.params[0] = { ...order, total };
+      },
+      // Final step with audit
+      async function(order) {
+        return {
+          order,
+          audit: {
+            processTime: Date.now() - this.context.startTime,
+            validations: this.context.validations
+          }
+        };
+      }
+    ]
+  }
 });
-
-// Client-side
-const client = open(connection, {
-    // Client exposes methods for server to call
-    routing: {
-        transformData: async function(data) {
-            return data.toUpperCase();
-        }
-    }
-});
-
-// Example flow:
-// 1. Client initiates call
-const result = await client.processWithCallback('hello');
-console.log(result); 
-// Output: "Processed: HELLO"
-
-// 2. Server can also initiate calls to client's exposed methods
-// This happens automatically when server uses this.invoke
 ```
 
-This enables:
+### Connection Context
+
+Connection context (`this.invoke[]`) provides persistent data storage across the entire connection lifecycle:
+
+- Scope: Connection-wide, shared across all requests
+- Lifetime: Persists until connection closes
+- Storage: Symbol-keyed storage for safety
+- Use Cases:
+  - User authentication state
+  - Session management
+  - Connection configuration
+  - Cached data
+  - Resource pooling
+
+Example: Authentication and session management
+```js
+const AUTH_KEY = Symbol('auth');
+const SESSION_KEY = Symbol('session');
+
+const server = open(connection, {
+  routing: {
+    auth: {
+      // Login and store session
+      login: async function(credentials) {
+        if (!credentials?.username || !credentials?.password) {
+          throw new Error('Invalid credentials');
+        }
+        
+        // Store auth state in connection context
+        this.invoke[AUTH_KEY] = {
+          username: credentials.username,
+          roles: ['user'],
+          loginTime: Date.now()
+        };
+        
+        // Initialize session data
+        this.invoke[SESSION_KEY] = {
+          lastAccess: Date.now(),
+          activities: []
+        };
+        
+        return { success: true };
+      },
+
+      // Protected resource access using stored context
+      getData: async function() {
+        const auth = this.invoke[AUTH_KEY];
+        if (!auth) throw new Error('Unauthorized');
+        
+        const session = this.invoke[SESSION_KEY];
+        session.lastAccess = Date.now();
+        session.activities.push('getData');
+        
+        return {
+          data: 'sensitive data',
+          actor: auth.username
+        };
+      },
+
+      // Clear context on logout
+      logout: async function() {
+        delete this.invoke[AUTH_KEY];
+        delete this.invoke[SESSION_KEY];
+        return { success: true };
+      }
+    }
+  }
+});
+```
+
+Key benefits of connection context:
+- Built-in connection lifecycle management
+- Automatic cleanup when connection closes
+- Symbol-based security
+- Simple and direct API
+- Natural integration with middleware chains
+
+## Bi-directional Communication
+
+DRPC supports full-duplex communication where both server and client can initiate calls. This enables easy implementation of:
 - Server push notifications
 - Real-time updates
-- Client-side API exposure
-- Callback-based workflows
-- Event-driven architectures
+- Two-way data synchronization
+- Callback-based APIs
+
+```js
+// Server
+const server = open(connection, {
+  routing: {
+    async notify(message) {
+      // Call client's onNotify method
+      await this.invoke.onNotify(message);
+      return true;
+    }
+  }
+});
+
+// Client
+const client = open(connection, {
+  routing: {
+    onNotify: message => {
+      console.log('Received:', message);
+    }
+  }
+});
+```
 
 ## Connection Management
+
+DRPC provides comprehensive connection lifecycle management:
+- Automatic reconnection
+- Timeout control
+- Maximum retry attempts
+- Retry delay
+- Connection state monitoring
 
 ### Auto Reconnection
 
@@ -395,6 +448,29 @@ const client = open(connection, {
 });
 ```
 
+## Error Handling
+
+The error handling system supports:
+- Request timeout handling
+- Connection loss handling
+- Business error processing
+- Error propagation
+- Error recovery
+
+```js
+try {
+  await client.someMethod();
+} catch (err) {
+  if (err.code === 'TIMEOUT') {
+    // Handle timeout
+  } else if (err.code === 'DISCONNECTED') {
+    // Handle connection error
+  } else {
+    // Handle other errors
+  }
+}
+```
+
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+MIT © [Instun](https://github.com/instun)

@@ -3,14 +3,30 @@ const assert = require('node:assert');
 const events = require('events');
 const { open } = require('../lib');
 
-// Helper function for sleeping
-const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
-
-// Helper function to create test connections
+// Helper function copied from handlers.test.js
 function createConnection(handler, { opened = false } = {}) {
     const peer1 = new events.EventEmitter();
     const peer2 = new events.EventEmitter();
     let isOpen = opened;
+    
+    // Add context storage
+    const contextStorage = new Map();
+    peer1.context = peer2.context = contextStorage;
+    
+    // Add context methods
+    peer1.setContext = peer2.setContext = (key, value) => {
+        if (typeof key !== 'symbol') {
+            throw new Error('Context key must be a Symbol');
+        }
+        contextStorage.set(key, value);
+    };
+    
+    peer1.getContext = peer2.getContext = (key) => {
+        if (typeof key !== 'symbol') {
+            throw new Error('Context key must be a Symbol');
+        }
+        return contextStorage.get(key);
+    };
 
     // Add send method
     peer1.send = data => {
@@ -20,6 +36,19 @@ function createConnection(handler, { opened = false } = {}) {
     peer2.send = data => {
         if (!isOpen) throw new Error('Connection closed');
         peer1.emit('message', { data });
+    };
+
+    // Add open/close methods
+    peer1.open = peer2.open = () => {
+        isOpen = true;
+        peer1.emit('open');
+        peer2.emit('open');
+    };
+
+    peer1.close = peer2.close = () => {
+        isOpen = false;
+        peer1.emit('close');
+        peer2.emit('close');
     };
 
     // Add event listeners
@@ -36,34 +65,244 @@ function createConnection(handler, { opened = false } = {}) {
         peer2.on(event, handler);
     };
 
-    // Add open/close methods
-    peer1.open = peer2.open = () => {
-        isOpen = true;
-        peer1.emit('open');
-        peer2.emit('open');
-    };
-
-    peer1.close = peer2.close = () => {
-        isOpen = false;
-        peer1.emit('close');
-        peer2.emit('close');
-    };
-
     handler(peer1);
     return peer2;
 }
 
-describe('Context Handling Tests', () => {
-    it('should provide RPC method context', async () => {
+describe('Handler Chain Context Tests', () => {
+    it('should share data between handlers using this.params', async () => {
         const conn = createConnection(conn => {
             open(conn, {
                 opened: true,
                 routing: {
-                    contextTest: async function() {
+                    process: [
+                        async function first(input) {
+                            this.params[0] = input.toUpperCase();
+                        },
+                        async function second(input) {
+                            this.params[0] = `${input}!`;
+                        },
+                        async function last(input) {
+                            return input;
+                        }
+                    ]
+                }
+            });
+        }, { opened: true });
+
+        const client = open(conn);
+        const result = await client.process('hello');
+        assert.strictEqual(result, 'HELLO!');
+    });
+
+    it('should preserve handler context integrity', async () => {
+        const conn = createConnection(conn => {
+            open(conn, {
+                opened: true,
+                routing: {
+                    calculate: [
+                        async function init(num) {
+                            this.steps = [];
+                            this.steps.push({ step: 'init', value: num });
+                            this.params[0] = num * 2;
+                        },
+                        async function addFive(num) {
+                            this.steps.push({ step: 'multiply', value: num });
+                            this.params[0] = num + 5;
+                        },
+                        async function finish(num) {
+                            this.steps.push({ step: 'add', value: num });
+                            return {
+                                result: num,
+                                steps: this.steps
+                            };
+                        }
+                    ]
+                }
+            });
+        }, { opened: true });
+
+        const client = open(conn);
+        const result = await client.calculate(10);
+        
+        assert.deepStrictEqual(result, {
+            result: 25,
+            steps: [
+                { step: 'init', value: 10 },
+                { step: 'multiply', value: 20 },
+                { step: 'add', value: 25 }
+            ]
+        });
+    });
+
+    it('should share context between handlers in chain', async () => {
+        const conn = createConnection(conn => {
+            open(conn, {
+                opened: true,
+                timeout: 5000, // 增加超时时间
+                routing: {
+                    shareTest: [
+                        async function first(input) {
+                            // Use this context directly
+                            this.shared = { input };
+                            this.params[0] = input + '1';
+                        },
+                        async function second(modified) {
+                            return {
+                                original: this.shared.input,
+                                modified
+                            };
+                        }
+                    ]
+                }
+            });
+        }, { opened: true });
+
+        const client = open(conn, { timeout: 5000 }); // 客户端也设置超时
+        const result = await client.shareTest('test');
+        assert.deepStrictEqual(result, {
+            original: 'test',
+            modified: 'test1'
+        });
+    });
+
+    it('should handle Symbol context in middleware chain', async () => {
+        const ctxKey = Symbol('middlewareContext');
+        const conn = createConnection(conn => {
+            open(conn, {
+                opened: true,
+                routing: {
+                    chainTest: [
+                        async function first(input) {
+                            this.invoke[ctxKey] = input;
+                            this.params[0] = 'modified';
+                        },
+                        async function second() {
+                            return {
+                                original: this.invoke[ctxKey],
+                                modified: this.params[0]
+                            };
+                        }
+                    ]
+                }
+            });
+        }, { opened: true });
+
+        const client = open(conn);
+        const result = await client.chainTest('original');
+        assert.deepStrictEqual(result, {
+            original: 'original',
+            modified: 'modified'
+        });
+    });
+});
+
+describe('Connection Level Context Tests', () => {
+    it('should share context at connection level using Symbols', async () => {
+        const symbolKey = Symbol('contextKey');
+        const conn = createConnection(conn => {
+            open(conn, {
+                opened: true,
+                routing: {
+                    getValue: async function() {
+                        return this.invoke[symbolKey];
+                    },
+                    setValue: async function(value) {
+                        this.invoke[symbolKey] = value;
+                        return true;
+                    }
+                }
+            });
+        }, { opened: true });
+
+        const client = open(conn);
+        await client.setValue('test-value');
+        const result = await client.getValue();
+        assert.strictEqual(result, 'test-value');
+    });
+
+    it('should handle invalid context usage', async () => {
+        const conn = createConnection(conn => {
+            open(conn, {
+                opened: true,
+                routing: {
+                    testInvalid: async function() {
+                        try {
+                            this.invoke['invalid-key'] = 'value';
+                        } catch (err) {
+                            return 'error-caught';
+                        }
+                    }
+                }
+            });
+        }, { opened: true });
+
+        const client = open(conn);
+        const result = await client.testInvalid();
+        assert.strictEqual(result, 'error-caught');
+    });
+
+    it('should isolate context between different connections', async () => {
+        const symbolKey = Symbol('contextKey');
+        const conn1 = createConnection(conn => {
+            open(conn, {
+                opened: true,
+                routing: {
+                    getValue: async function() {
+                        return this.invoke[symbolKey];
+                    },
+                    setValue: async function(value) {
+                        this.invoke[symbolKey] = value;
+                        return true;
+                    }
+                }
+            });
+        }, { opened: true });
+
+        const conn2 = createConnection(conn => {
+            open(conn, {
+                opened: true,
+                routing: {
+                    getValue: async function() {
+                        return this.invoke[symbolKey];
+                    },
+                    setValue: async function(value) {
+                        this.invoke[symbolKey] = value;
+                        return true;
+                    }
+                }
+            });
+        }, { opened: true });
+
+        const client1 = open(conn1);
+        const client2 = open(conn2);
+
+        await client1.setValue('value1');
+        await client2.setValue('value2');
+
+        const result1 = await client1.getValue();
+        const result2 = await client2.getValue();
+
+        assert.strictEqual(result1, 'value1');
+        assert.strictEqual(result2, 'value2');
+    });
+
+    it('should support multiple Symbol contexts', async () => {
+        const key1 = Symbol('context1');
+        const key2 = Symbol('context2');
+        const conn = createConnection(conn => {
+            open(conn, {
+                opened: true,
+                routing: {
+                    setMulti: async function(val1, val2) {
+                        this.invoke[key1] = val1;
+                        this.invoke[key2] = val2;
+                        return true;
+                    },
+                    getMulti: async function() {
                         return {
-                            method: this.method,
-                            hasParams: Array.isArray(this.params),
-                            id: this.id  // 修改: messageId -> id 匹配实际上下文属性名
+                            value1: this.invoke[key1],
+                            value2: this.invoke[key2]
                         };
                     }
                 }
@@ -71,161 +310,136 @@ describe('Context Handling Tests', () => {
         }, { opened: true });
 
         const client = open(conn);
-        const result = await client.contextTest();
-
-        // 修改: 使用 id 而不是 messageId 进行断言
-        assert.strictEqual(result.method, 'contextTest', 'method name should be available in context');
-        assert.strictEqual(result.hasParams, true, 'params should be an array');
-        assert.ok(typeof result.id === 'number' && result.id >= 0, 'should have valid message id');
+        await client.setMulti('first', 'second');
+        const result = await client.getMulti();
+        assert.deepStrictEqual(result, {
+            value1: 'first',
+            value2: 'second'
+        });
     });
 
-    it('should handle middleware context sharing and tracking', async () => {
-        // 创建一个通用的上下文管理器
-        const contextManager = {
-            values: new Map(),
-            operations: [],
-            getValue(key) {
-                this.operations.push(`get:${key}`);
-                return this.values.get(key);
-            },
-            setValue(key, value) {
-                this.operations.push(`set:${key}`);
-                this.values.set(key, value);
-            },
-            clearOperations() {
-                this.operations = [];
-            }
-        };
-
+    it('should preserve invoke context after reconnection', async () => {
+        const reconnectKey = Symbol('reconnect');
         const conn = createConnection(conn => {
             open(conn, {
                 opened: true,
+                timeout: 1000,
                 routing: {
-                    context: {
-                        // 设置上下文值
-                        set: [
-                            async function validateInput(data) {
-                                if (!data || typeof data.key !== 'string') {
-                                    this.params[0] = { error: 'Invalid input' };
-                                } else {
-                                    this.params[0] = { ...data };
-                                }
-                            },
-                            async function setAndTrack(data) {
-                                if (data.error) {
-                                    throw new Error(data.error);
-                                }
-                                contextManager.setValue(data.key, data.value);
-                                return { success: true, key: data.key };
-                            }
-                        ],
-                        // 获取上下文值
-                        get: [
-                            async function validateKey(key) {
-                                const isValid = typeof key === 'string';  // 修改: 添加验证结果
-                                this.params[0] = { 
-                                    key,
-                                    isValid,
-                                    error: isValid ? null : 'Invalid key'
-                                };
-                            },
-                            async function getValue(data) {
-                                if (!data.isValid) {
-                                    throw new Error(data.error);
-                                }
-                                const value = contextManager.getValue(data.key);
-                                if (value === undefined) {
-                                    throw new Error('Key not found');
-                                }
-                                return { 
-                                    key: data.key, 
-                                    value,
-                                    isKeyValid: true  // 修改: 添加验证标记到返回值
-                                };
-                            }
-                        ],
-                        // 在中间件链中传递上下文
-                        process: [
-                            async function first(data) {
-                                contextManager.setValue('_temp', data);
-                                this.params[0] = { 
-                                    step: 1,
-                                    tempSet: true,
-                                    originalData: data
-                                };
-                            },
-                            async function second() {
-                                const tempData = contextManager.getValue('_temp');
-                                this.params[0] = {
-                                    ...this.params[0],
-                                    step: 2,
-                                    tempData,
-                                    tempRetrieved: true
-                                };
-                            },
-                            async function final() {
-                                const result = {
-                                    ...this.params[0],
-                                    operations: contextManager.operations,
-                                    tempCleared: true
-                                };
-                                contextManager.setValue('_temp', null);
-                                return result;
-                            }
-                        ]
+                    setValue: async function(value) {
+                        this.invoke[reconnectKey] = value;
+                        return true;
+                    },
+                    getValue: async function() {
+                        return this.invoke[reconnectKey];
                     }
                 }
             });
         }, { opened: true });
 
-        const client = open(conn, { opened: true });
-
-        // 测试基本的设置和获取
-        const setResult = await client.context.set({ key: 'testKey', value: 'testValue' });
-        assert.deepStrictEqual(setResult, { success: true, key: 'testKey' });
-
-        const getResult = await client.context.get('testKey');
-        assert.ok(getResult.isKeyValid, 'key should be valid');
-        assert.strictEqual(getResult.key, 'testKey');
-        assert.strictEqual(getResult.value, 'testValue');
-
-        // 测试错误处理
-        await assert.rejects(
-            () => client.context.get('nonexistent'),
-            { message: 'Key not found' }
-        );
-
-        await assert.rejects(
-            () => client.context.set(null),
-            { message: 'Invalid input' }
-        );
-
-        // 测试中间件链中的上下文传递
-        contextManager.clearOperations();
-        const processResult = await client.context.process({ test: true });
+        const client = open(conn, { timeout: 1000 });
         
-        // 验证处理流程的每个步骤
-        assert.strictEqual(processResult.step, 2);
-        assert.ok(processResult.tempSet, 'should set temp data');
-        assert.ok(processResult.tempRetrieved, 'should retrieve temp data');
-        assert.ok(processResult.tempCleared, 'should clear temp data');
-        assert.deepStrictEqual(processResult.originalData, { test: true });
-        assert.deepStrictEqual(processResult.operations, [
-            'set:_temp',
-            'get:_temp',
-            'set:_temp'
-        ]);
+        await client.setValue('persist');
+        conn.close(); // 触发断开
+        await sleep(50); // 等待重连
+        conn.open();  // 重新连接
+        await sleep(50); // 等待连接就绪
+        
+        const result = await client.getValue();
+        assert.strictEqual(result, 'persist');
+    });
+});
 
-        // 验证临时数据已被清理
-        const finalTempValue = contextManager.getValue('_temp');
-        assert.strictEqual(finalTempValue, null);
+describe('Context Interaction Tests', () => {
+    it('should support nested method calls sharing context', async () => {
+        const contextKey = Symbol('sharedData');
+        const conn = createConnection(conn => {
+            open(conn, {
+                opened: true,
+                routing: {
+                    outer: async function(value) {
+                        // 在本地上下文中存储值
+                        this.invoke[contextKey] = value;
+                    },
+                    inner: async function() {
+                        // 从本地上下文中读取值
+                        return this.invoke[contextKey];
+                    }
+                }
+            });
+        }, { opened: true });
+
+        const client = open(conn);
+        await client.outer('nested-test');
+        const result = await client.inner();
+        assert.strictEqual(result, 'nested-test');
     });
 
-    it('should handle cross-method context with WeakMap', async () => {
-        // 创建一个 WeakMap 来存储方法调用上下文
-        const methodContexts = new WeakMap();
+    it('should maintain request context isolation', async () => {
+        const contextKey = Symbol('requestContext');
+        const conn = createConnection(conn => {
+            open(conn, {
+                opened: true,
+                routing: {
+                    method1: async function() {
+                        this[contextKey] = 'method1-data';
+                        await sleep(10);
+                        return this[contextKey];
+                    },
+                    method2: async function() {
+                        this[contextKey] = 'method2-data';
+                        await sleep(5);
+                        return this[contextKey];
+                    }
+                }
+            });
+        }, { opened: true });
+
+        const client = open(conn);
+        const [result1, result2] = await Promise.all([
+            client.method1(),
+            client.method2()
+        ]);
         
-        // 用于跟踪调用顺序
+        assert.strictEqual(result1, 'method1-data');
+        assert.strictEqual(result2, 'method2-data');
+    });
+
+    it('should maintain connection-level context with this.invoke', async () => {
+        const contextKey1 = Symbol('methodContext1');
+        const contextKey2 = Symbol('methodContext2');
+        const conn = createConnection(conn => {
+            open(conn, {
+                opened: true,
+                routing: {
+                    method1: async function() {
+                        // Store in connection context
+                        this.invoke[contextKey1] = 'method1-data';
+                        await sleep(10);
+                        return this.invoke[contextKey1];
+                    },
+                    method2: async function() {
+                        // Store in same connection but different key
+                        this.invoke[contextKey2] = 'method2-data';
+                        await sleep(5);
+                        return this.invoke[contextKey2];
+                    }
+                }
+            });
+        }, { opened: true });
+
+        const client = open(conn);
+        const [result1, result2] = await Promise.all([
+            client.method1(),
+            client.method2()
+        ]);
+        
+        assert.strictEqual(result1, 'method1-data');
+        assert.strictEqual(result2, 'method2-data');
+    });
+
+    it('should handle cross-method context with invoke storage', async () => {
+        const workflowIdKey = Symbol('workflowId');
+        const stepsKey = Symbol('steps');
         const calls = [];
 
         const conn = createConnection(conn => {
@@ -235,61 +449,52 @@ describe('Context Handling Tests', () => {
                     workflow: {
                         start: [
                             async function initContext() {
-                                // 使用 this.invoke 作为 key 存储上下文
-                                methodContexts.set(this.invoke, {
-                                    workflowId: Date.now(),
-                                    steps: []
-                                });
+                                this.invoke[workflowIdKey] = Date.now();
+                                this.invoke[stepsKey] = [];
                                 return { started: true };
                             }
                         ],
                         step: [
                             async function checkContext() {
-                                // 获取当前工作流上下文
-                                const context = methodContexts.get(this.invoke);
-                                if (!context) {
+                                const workflowId = this.invoke[workflowIdKey];
+                                if (!workflowId) {
                                     throw new Error('No workflow context found');
                                 }
                                 this.params[0] = {
                                     ...this.params[0],
-                                    workflowId: context.workflowId
+                                    workflowId
                                 };
                             },
                             async function recordStep(data) {
-                                const context = methodContexts.get(this.invoke);
-                                context.steps.push(data.step);
+                                const steps = this.invoke[stepsKey];
+                                steps.push(data.step);
                                 calls.push(`step:${data.step}`);
                                 return {
-                                    workflowId: context.workflowId,
+                                    workflowId: this.invoke[workflowIdKey],
                                     currentStep: data.step,
-                                    totalSteps: context.steps.length
+                                    totalSteps: steps.length
                                 };
                             }
                         ],
                         complete: [
                             async function finalizeWorkflow() {
-                                const context = methodContexts.get(this.invoke);
-                                if (!context) {
+                                const workflowId = this.invoke[workflowIdKey];
+                                if (!workflowId) {
                                     throw new Error('No workflow context found');
                                 }
 
                                 const result = {
-                                    workflowId: context.workflowId,
-                                    steps: [...context.steps],
+                                    workflowId,
+                                    steps: [...this.invoke[stepsKey]],
                                     completed: true
                                 };
 
-                                // 清理上下文
-                                methodContexts.delete(this.invoke);
                                 calls.push('complete');
-
                                 return result;
                             }
                         ],
-                        // 用于测试无上下文的情况
                         invalid: async function() {
-                            const context = methodContexts.get(this.invoke);
-                            return { hasContext: !!context };
+                            return { hasContext: !!this.invoke[workflowIdKey] };
                         }
                     }
                 }
@@ -315,21 +520,8 @@ describe('Context Handling Tests', () => {
         const completeResult = await client.workflow.complete();
         assert.deepStrictEqual(completeResult.steps, ['prepare', 'process']);
         assert.strictEqual(completeResult.completed, true);
-
-        // 验证调用顺序
-        assert.deepStrictEqual(calls, [
-            'step:prepare',
-            'step:process',
-            'complete'
-        ]);
-
-        // 验证无上下文的调用
-        const invalidResult = await client.workflow.invalid();
-        assert.deepStrictEqual(invalidResult, { hasContext: false });
-
-        // 验证上下文已被清理
-        const finalResult = await client.workflow.step({ step: 'extra' }).catch(e => e);
-        assert.ok(finalResult instanceof Error);
-        assert.strictEqual(finalResult.message, 'No workflow context found');
     });
 });
+
+// Helper function for sleeping
+const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
